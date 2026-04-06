@@ -30,6 +30,7 @@ SolidCompression=yes
 PrivilegesRequired=admin
 WizardStyle=modern
 UninstallDisplayIcon={app}\GreeterApp.exe
+ChangesEnvironment=yes
 
 [Files]
 ; Application files from dotnet publish output
@@ -114,4 +115,61 @@ begin
   Result := False;
   if PageID = ConfigPage.ID then
     Result := WizardSilent();
+end;
+
+// =========================================================================
+// PATH management: add {app} on install, remove on uninstall
+// =========================================================================
+
+const
+  EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+
+procedure AddToPath();
+var
+  CurrentPath, AppDir: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', CurrentPath) then
+    CurrentPath := '';
+  // Only add if not already present
+  if Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(CurrentPath) + ';') = 0 then
+    RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', CurrentPath + ';' + AppDir);
+end;
+
+procedure RemoveFromPath();
+var
+  CurrentPath, AppDir: String;
+  P: Integer;
+begin
+  AppDir := ExpandConstant('{app}');
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', CurrentPath) then
+    Exit;
+  // Remove ";{app}" or "{app};" from the path
+  P := Pos(';' + Uppercase(AppDir), Uppercase(CurrentPath));
+  if P > 0 then
+    Delete(CurrentPath, P, Length(AppDir) + 1)
+  else begin
+    P := Pos(Uppercase(AppDir) + ';', Uppercase(CurrentPath));
+    if P > 0 then
+      Delete(CurrentPath, P, Length(AppDir) + 1)
+    else begin
+      // Exact match (only entry in PATH)
+      P := Pos(Uppercase(AppDir), Uppercase(CurrentPath));
+      if P > 0 then
+        Delete(CurrentPath, P, Length(AppDir));
+    end;
+  end;
+  RegWriteExpandStringValue(HKEY_LOCAL_MACHINE, EnvironmentKey, 'Path', CurrentPath);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    AddToPath();
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath();
 end;
