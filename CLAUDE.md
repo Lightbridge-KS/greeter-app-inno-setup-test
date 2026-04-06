@@ -36,13 +36,15 @@ Output: `installer/Output/GreeterApp-Setup-1.0.0.exe`
 1. `.iss` `[Code]` section creates a custom input page (Greeting + Recipient fields) via `CreateInputQueryPage`, inserted after directory selection.
 2. `[Files]` copies published app + PowerShell script to install dir.
 3. `[Run]` calls `Set-AppSettings.ps1` which reads appsettings.json as JSON, sets the keys, writes it back.
-4. Silent install: `Setup.exe /VERYSILENT /GREETING="Hi" /RECIPIENT="Hospital"` — the `[Code]` reads `/PARAM=value` from command line and skips the UI page.
+4. `[Code]` adds `{app}` to the system `PATH` via registry (`HKLM\...\Environment\Path`) on install and removes it on uninstall. `ChangesEnvironment=yes` broadcasts `WM_SETTINGCHANGE` so new terminals pick up the change.
+5. Silent install: `Setup.exe /VERYSILENT /GREETING="Hi" /RECIPIENT="Hospital"` — the `[Code]` reads `/PARAM=value` from command line and skips the UI page.
 
 ## Key Design Decisions
 
 - `appsettings.json` ships with sensible defaults (not placeholders) — the PowerShell script overwrites values using `ConvertFrom-Json` / `ConvertTo-Json`.
 - Single `.iss` file handles everything (dialog, files, post-install action, uninstall).
 - `iscc.exe` is pre-installed on `windows-latest` runners — zero CI setup.
+- PATH management uses `RegWriteExpandStringValue` (not `RegWriteStringValue`) to preserve expandable variables like `%SystemRoot%` in the existing PATH. Removal is surgical — only the app entry is deleted, not the entire variable.
 
 ## Known Issues / TODOs
 
