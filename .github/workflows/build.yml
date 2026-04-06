@@ -46,7 +46,7 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $ver = $tag -replace '^v', ''
-          if (-not $ver) { $ver = "0.0.0" }
+          if ($ver -notmatch '^\d+\.\d+') { $ver = "0.0.0" }
           echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
           echo "Version: $ver"
 
