@@ -6,8 +6,10 @@
 #
 # Flow:
 #   dotnet publish (win-x64, self-contained, single-file)
-#     -> iscc.exe (produces Setup.exe)
-#       -> upload to GitHub Release
+#     -> signtool sign GreeterApp.exe
+#       -> iscc.exe (produces Setup.exe)
+#         -> signtool sign Setup.exe
+#           -> upload to GitHub Release
 
 name: Build Windows Installer
 
@@ -61,6 +63,39 @@ jobs:
           -p:Version=${{ steps.version.outputs.VERSION }}
           -o ${{ env.PUBLISH_DIR }}
 
+      # ── Import code-signing certificate ──────────────────────────────
+      - name: Import code-signing certificate
+        if: env.SIGN_CERT_BASE64 != ''
+        shell: pwsh
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.SIGN_CERT_BASE64 }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $pfxBytes = [Convert]::FromBase64String($env:SIGN_CERT_BASE64)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "code-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+          echo "PFX_PATH=$pfxPath" >> $env:GITHUB_ENV
+
+          # Locate signtool.exe from Windows SDK
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Recurse -Filter "signtool.exe" |
+            Where-Object { $_.FullName -match "x64" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          echo "SIGNTOOL=$signtool" >> $env:GITHUB_ENV
+
+      # ── Sign the app exe ────────────────────────────────────────────
+      - name: Sign GreeterApp.exe
+        if: env.PFX_PATH != ''
+        shell: pwsh
+        env:
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          & $env:SIGNTOOL sign /f $env:PFX_PATH /p $env:SIGN_CERT_PASSWORD `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            /d "GreeterApp" `
+            "${{ env.PUBLISH_DIR }}\GreeterApp.exe"
+
       # ── Build Setup.exe with Inno Setup ─────────────────────────────
       # iscc.exe is pre-installed at this path on windows-latest runners
       - name: Build Inno Setup installer
@@ -72,6 +107,26 @@ jobs:
             /DAppVersion="${{ steps.version.outputs.VERSION }}" `
             /DPublishDir="$publishDir" `
             ./installer/greeter-setup.iss
+
+      # ── Sign the installer exe ──────────────────────────────────────
+      - name: Sign Setup.exe
+        if: env.PFX_PATH != ''
+        shell: pwsh
+        env:
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $installer = Get-ChildItem "./installer/Output/GreeterApp-Setup-*.exe" |
+            Select-Object -First 1 -ExpandProperty FullName
+          & $env:SIGNTOOL sign /f $env:PFX_PATH /p $env:SIGN_CERT_PASSWORD `
+            /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            /d "GreeterApp Setup" `
+            "$installer"
+
+      # ── Clean up certificate ────────────────────────────────────────
+      - name: Remove PFX file
+        if: always() && env.PFX_PATH != ''
+        shell: pwsh
+        run: Remove-Item $env:PFX_PATH -Force -ErrorAction SilentlyContinue
 
       # ── Upload build artifact ───────────────────────────────────────
       - name: Upload installer artifact
