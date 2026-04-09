@@ -16,7 +16,7 @@
 src/GreeterApp/              → .NET CLI app (reads appsettings.json, prints greeting)
 installer/greeter-setup.iss  → Inno Setup script (dialog, files, config patching — all-in-one)
 installer/scripts/Set-AppSettings.ps1 → Overwrites JSON keys with user values
-.github/workflows/build.yml  → CI: publish → iscc → GitHub Release
+.github/workflows/build.yml  → CI: publish → sign → iscc → sign → GitHub Release
 ```
 
 ## Build Commands (Windows only)
@@ -46,7 +46,14 @@ Output: `installer/Output/GreeterApp-Setup-1.0.0.exe`
 - `iscc.exe` is pre-installed on `windows-latest` runners — zero CI setup.
 - PATH management uses `RegWriteExpandStringValue` (not `RegWriteStringValue`) to preserve expandable variables like `%SystemRoot%` in the existing PATH. Removal is surgical — only the app entry is deleted, not the entire variable.
 
+## Code Signing
+
+- CI signs both `GreeterApp.exe` and `GreeterApp-Setup-*.exe` using Authenticode via `signtool.exe`.
+- Self-signed certificate (PFX) is stored as a base64-encoded repo secret (`SIGN_CERT_BASE64` + `SIGN_CERT_PASSWORD`).
+- Signatures use SHA256 with RFC 3161 timestamping (`timestamp.digicert.com`) so they remain valid after cert expiry.
+- Signing steps are skipped gracefully when secrets are not configured (e.g., on forks).
+
 ## Known Issues / TODOs
 
-- No code-signing configured yet.
+- Self-signed cert triggers Windows SmartScreen "Unknown publisher" warning — acceptable for personal/internal use.
 - Inno Setup `AppId` GUID should be unique per real product — update before reuse.
